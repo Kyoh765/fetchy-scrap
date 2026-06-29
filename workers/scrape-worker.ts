@@ -63,14 +63,13 @@ export async function scrapeAllAccounts(opts?: { batch?: number; offset?: number
           continue
         }
 
-        // Tous les noms possibles de vues selon la version HikerAPI
+        // play_count = vues des reels (HikerAPI v1)
+        // view_count est toujours 0 → ne pas l'utiliser en premier
         const views = Number(
-          post.view_count        ??
-          post.play_count        ??
-          post.video_view_count  ??
-          post.ig_play_count     ??
-          post.views_count       ??
-          (post.clips_metadata as Record<string,unknown>)?.reels_media_metadata as number ??
+          post.play_count       ||  // reels / clips ✓
+          post.video_view_count ||  // videos classiques
+          post.ig_play_count    ||  // variante
+          post.view_count       ||  // fallback (souvent 0)
           0
         )
 
@@ -92,7 +91,7 @@ export async function scrapeAllAccounts(opts?: { batch?: number; offset?: number
               type:              (mediaType === 'carousel_container' || mediaType === '8') ? 'carousel' : 'reel',
               url:               String(post.permalink ?? `https://instagram.com/p/${post.code}/`),
               thumbnail_url:     extractThumb(post),
-              caption:           String((post.caption as Record<string,unknown>)?.text ?? post.caption ?? ''),
+              caption:           String(post.caption_text ?? (post.caption as Record<string,unknown>)?.text ?? post.caption ?? ''),
               views_count:       views,
               likes_count:       Number(post.like_count ?? 0),
               comments_count:    Number(post.comment_count ?? 0),
