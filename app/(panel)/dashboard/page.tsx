@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { AlertCard } from '@/components/AlertCard'
 import { TrendingUp, Flame, Zap, BarChart2, Activity } from 'lucide-react'
+import { DashboardGrid } from './DashboardGrid'
 
 export default async function DashboardPage() {
   const supabase = createClient()
@@ -16,7 +16,7 @@ export default async function DashboardPage() {
       monitored_accounts ( id, instagram_username )
     `)
     .order('detected_at', { ascending: false })
-    .limit(30)
+    .limit(120)
 
   if (alerts && alerts.length > 0) {
     await supabase.from('alert_reads').upsert(
@@ -39,10 +39,10 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="page-pad" style={{ maxWidth: 960, margin: '0 auto' }}>
+    <div className="page-pad" style={{ maxWidth: 1200, margin: '0 auto' }}>
 
       {/* ── Header ── */}
-      <div className="slide-up page-header">
+      <div className="slide-up page-header" style={{ marginBottom: 20 }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
             <div style={{
@@ -63,7 +63,6 @@ export default async function DashboardPage() {
             &nbsp;la moyenne des vues du compte
           </p>
         </div>
-
         <div style={{
           display: 'flex', alignItems: 'center', gap: 6,
           padding: '8px 14px', borderRadius: 12,
@@ -78,7 +77,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* ── Stat cards ── */}
-      <div className="stat-grid stagger" style={{ marginBottom: 28 }}>
+      <div className="stat-grid stagger" style={{ marginBottom: 24 }}>
         <StatCard
           icon={<Zap size={15} />}
           label="Alertes aujourd'hui"
@@ -102,50 +101,12 @@ export default async function DashboardPage() {
           color="#a855f7"
           alphaBg="rgba(168,85,247,0.06)"
           border="rgba(168,85,247,0.14)"
-          sub={totalViews > 0 ? `${formatNum(totalViews)} vues` : undefined}
+          sub={totalViews > 0 ? `${formatNum(totalViews)} vues totales` : undefined}
         />
       </div>
 
-      {/* ── Feed d'alertes ── */}
-      {alerts && alerts.length > 0 ? (
-        <div className="stagger" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {alerts.map((alert, i) => (
-            <div
-              key={alert.id}
-              className="slide-up alert-card-anim"
-              style={{ animationDelay: `${0.04 + i * 0.04}s` }}
-            >
-              <AlertCard alert={alert} />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div
-          className="fade-in"
-          style={{
-            textAlign: 'center',
-            padding: '80px 24px',
-            borderRadius: 20,
-            border: '1px dashed var(--border-mid)',
-            color: 'var(--text-3)',
-          }}
-        >
-          <div style={{
-            width: 56, height: 56, borderRadius: 16,
-            background: 'rgba(37,99,235,0.06)', border: '1px solid var(--border)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            margin: '0 auto 18px',
-          }}>
-            <TrendingUp size={24} style={{ opacity: 0.35, color: 'var(--accent-glow)' }} />
-          </div>
-          <p style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-2)', margin: '0 0 6px' }}>
-            Aucune alerte virale pour le moment
-          </p>
-          <p style={{ fontSize: 13, margin: 0 }}>
-            Ajoutez des comptes Instagram et lancez le scraping
-          </p>
-        </div>
-      )}
+      {/* ── Grille interactive (client) ── */}
+      <DashboardGrid alerts={alerts ?? []} />
     </div>
   )
 }
@@ -164,12 +125,7 @@ function StatCard({
   return (
     <div
       className="stat-card slide-up"
-      style={{
-        borderRadius: 18,
-        padding: '20px 22px',
-        background: alphaBg,
-        border: `1px solid ${border}`,
-      }}
+      style={{ borderRadius: 18, padding: '20px 22px', background: alphaBg, border: `1px solid ${border}` }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 14 }}>
         <span style={{ color }}>{icon}</span>
@@ -178,9 +134,7 @@ function StatCard({
       <div className="count-up" style={{ fontSize: 30, fontWeight: 900, color, letterSpacing: '-0.04em', lineHeight: 1 }}>
         {value}
       </div>
-      {sub && (
-        <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6 }}>{sub}</div>
-      )}
+      {sub && <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6 }}>{sub}</div>}
     </div>
   )
 }
