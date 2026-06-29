@@ -44,8 +44,9 @@ export function DashboardGrid({ posts: initialPosts }: { posts: PostRow[] }) {
   const [livePosts,  setLivePosts]  = useState<PostRow[]>(initialPosts)
   const [newCount,   setNewCount]   = useState(0)
   const [refreshing, setRefreshing] = useState(false)
-  const [scraping,   setScraping]   = useState(false)
-  const [scrapeMsg,  setScrapeMsg]  = useState<string | null>(null)
+  const [scraping,      setScraping]      = useState(false)
+  const [scrapeMsg,     setScrapeMsg]     = useState<string | null>(null)
+  const [scrapeProgress, setScrapeProgress] = useState<{ done: number; total: number } | null>(null)
   const [connected,  setConnected]  = useState(false)
 
   const [period,        setPeriod]        = useState(DEFAULT.period)
@@ -102,33 +103,60 @@ export function DashboardGrid({ posts: initialPosts }: { posts: PostRow[] }) {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
-  // ── Scraper ────────────────────────────────────────────────────────
+  // ── Scraper en boucle (batch=2 pour éviter timeout Vercel 60s) ────
   const handleScrape = useCallback(async () => {
     setScraping(true)
     setScrapeMsg(null)
-    try {
-      const controller = new AbortController()
-      const timeoutId  = setTimeout(() => controller.abort(), 55_000)
-      const res = await fetch('/api/panel/scrape', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ batch: 8 }),
-        signal: controller.signal,
-      })
-      clearTimeout(timeoutId)
-      let data: Record<string, unknown> = {}
-      try { data = await res.json() } catch { /* body vide */ }
-      if (res.ok && data.ok) {
-        setScrapeMsg(`✓ ${data.accounts_scraped}/${data.total_accounts} comptes`)
-        setTimeout(handleRefresh, 1500)
-      } else {
-        setScrapeMsg((data.error as string) ?? `Erreur ${res.status}`)
+    setScrapeProgress(null)
+
+    const BATCH = 2
+    let offset  = 0
+    let total   = 0
+    let scraped = 0
+    let hasMore = true
+
+    while (hasMore) {
+      try {
+        const controller = new AbortController()
+        const timeoutId  = setTimeout(() => controller.abort(), 55_000)
+        const res = await fetch('/api/panel/scrape', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ batch: BATCH, offset }),
+          signal: controller.signal,
+        })
+        clearTimeout(timeoutId)
+
+        let data: Record<string, unknown> = {}
+        try { data = await res.json() } catch { /* body vide */ }
+
+        if (!res.ok) {
+          setScrapeMsg((data.error as string) ?? `Erreur ${res.status}`)
+          break
+        }
+
+        total   = (data.total_accounts as number) ?? total
+        scraped += (data.accounts_scraped as number) ?? 0
+        hasMore  = (data.has_more as boolean) ?? false
+        offset   = (data.next_offset as number) ?? (offset + BATCH)
+
+        setScrapeProgress({ done: offset, total })
+
+        // Refresh intermédiaire tous les 4 comptes
+        if (offset % 4 === 0) handleRefresh()
+
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (!msg.includes('abort')) { setScrapeMsg(`Erreur: ${msg}`); break }
+        // Si timeout sur ce batch, on continue quand même
+        offset  += BATCH
+        hasMore  = offset < 40 // sécurité
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setScrapeMsg(msg.includes('abort') ? 'Timeout — actualisation en cours…' : `Erreur: ${msg}`)
-      setTimeout(handleRefresh, 2000)
     }
+
+    await handleRefresh()
+    setScrapeProgress(null)
+    setScrapeMsg(`✓ ${scraped}/${total} comptes scrapés`)
     setScraping(false)
     setTimeout(() => setScrapeMsg(null), 6000)
   }, [handleRefresh])
@@ -209,7 +237,8 @@ export function DashboardGrid({ posts: initialPosts }: { posts: PostRow[] }) {
           color: 'var(--accent-glow)', transition: 'all 0.15s',
         }}>
           {scraping
-            ? <><Loader2 size={12} style={{ animation: 'spin 0.8s linear infinite' }} /> Scraping…</>
+            ? <><Loader2 size={12} style={{ animation: 'spin 0.8s linear infinite' }} />
+                {scrapeProgress ? `${scrapeProgress.done}/${scrapeProgress.total}` : 'Scraping…'}</>
             : <><Zap size={12} /> Scraper</>}
         </button>
 
