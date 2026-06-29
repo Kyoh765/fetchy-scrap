@@ -1,34 +1,11 @@
 'use client'
 import { useState, useMemo, useEffect, useCallback } from 'react'
-import { AlertCard } from '@/components/AlertCard'
 import { TrendingUp, X, SlidersHorizontal, RefreshCw, Loader2, Zap, Wifi } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { PostCard } from '@/components/PostCard'
+import type { PostRow } from './page'
 
-type Alert = {
-  id: string
-  multiplier: number
-  viral_views: number
-  baseline_views: number
-  detected_at: string
-  posts: {
-    id: string
-    type: string
-    url: string
-    thumbnail_url: string | null
-    caption: string | null
-    views_count: number
-    likes_count: number
-    comments_count: number
-    published_at: string
-    instagram_post_id: string
-  } | null
-  monitored_accounts: {
-    id: string
-    instagram_username: string
-  } | null
-}
-
-const ALERT_SELECT = `*, posts(id, type, url, thumbnail_url, caption, views_count, likes_count, comments_count, published_at, instagram_post_id), monitored_accounts(id, instagram_username)`
+const POST_SELECT = `id, type, url, thumbnail_url, caption, views_count, likes_count, comments_count, published_at, instagram_post_id, account_id, monitored_accounts(id, instagram_username), viral_alerts(multiplier, baseline_views, viral_views, detected_at)`
 
 const PERIODS = [
   { label: 'Tout', value: 'all' },
@@ -43,9 +20,9 @@ const VIEW_FILTERS = [
   { label: '1M+',    value: 1_000_000 },
 ]
 const SORT_OPTIONS = [
-  { label: 'Outlier ×',  value: 'ratio' },
-  { label: 'Vues',       value: 'views' },
   { label: 'Récent',     value: 'recent' },
+  { label: 'Vues',       value: 'views' },
+  { label: 'Outlier ×',  value: 'ratio' },
 ]
 const TYPE_OPTIONS = [
   { label: 'Tous',      value: 'all' },
@@ -61,10 +38,10 @@ const MULTIPLIER_OPTIONS = [
   { label: '×15+', value: 15 },
 ]
 
-const DEFAULT = { period: 'all', minViews: 0, sort: 'ratio', type: 'all', minMultiplier: 0 }
+const DEFAULT = { period: 'all', minViews: 0, sort: 'recent', type: 'all', minMultiplier: 0 }
 
-export function DashboardGrid({ alerts: initialAlerts }: { alerts: Alert[] }) {
-  const [liveAlerts, setLiveAlerts] = useState<Alert[]>(initialAlerts)
+export function DashboardGrid({ posts: initialPosts }: { posts: PostRow[] }) {
+  const [livePosts,  setLivePosts]  = useState<PostRow[]>(initialPosts)
   const [newCount,   setNewCount]   = useState(0)
   const [refreshing, setRefreshing] = useState(false)
   const [scraping,   setScraping]   = useState(false)
@@ -78,7 +55,10 @@ export function DashboardGrid({ alerts: initialAlerts }: { alerts: Alert[] }) {
   const [minMultiplier, setMinMultiplier] = useState(DEFAULT.minMultiplier)
 
   const isDirty = period !== DEFAULT.period || minViews !== DEFAULT.minViews || type !== DEFAULT.type || minMultiplier !== DEFAULT.minMultiplier
-  function reset() { setPeriod(DEFAULT.period); setMinViews(DEFAULT.minViews); setType(DEFAULT.type); setMinMultiplier(DEFAULT.minMultiplier) }
+  function reset() {
+    setPeriod(DEFAULT.period); setMinViews(DEFAULT.minViews)
+    setType(DEFAULT.type); setMinMultiplier(DEFAULT.minMultiplier)
+  }
 
   // ── Actualiser ─────────────────────────────────────────────────────
   const handleRefresh = useCallback(async () => {
@@ -86,38 +66,37 @@ export function DashboardGrid({ alerts: initialAlerts }: { alerts: Alert[] }) {
     setNewCount(0)
     const supabase = createClient()
     const { data } = await supabase
-      .from('viral_alerts')
-      .select(ALERT_SELECT)
-      .order('detected_at', { ascending: false })
-      .limit(120)
-    if (data) setLiveAlerts(data as Alert[])
+      .from('posts')
+      .select(POST_SELECT)
+      .order('published_at', { ascending: false })
+      .limit(200)
+    if (data) setLivePosts(data as unknown as PostRow[])
     setRefreshing(false)
   }, [])
 
-  // ── Polling auto toutes les 30s (fallback si Realtime non configuré) ──
+  // ── Polling auto 30s ───────────────────────────────────────────────
   useEffect(() => {
     const id = setInterval(handleRefresh, 30_000)
     return () => clearInterval(id)
   }, [handleRefresh])
 
-  // ── Supabase Realtime ──────────────────────────────────────────────
+  // ── Supabase Realtime sur posts ────────────────────────────────────
   useEffect(() => {
     const supabase = createClient()
     const channel = supabase
-      .channel('dashboard_realtime')
+      .channel('posts_realtime')
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .on('postgres_changes' as any, { event: 'INSERT', schema: 'public', table: 'viral_alerts' }, async (payload: any) => {
-          const { data } = await supabase
-            .from('viral_alerts')
-            .select(ALERT_SELECT)
-            .eq('id', payload.new.id)
-            .single()
-          if (data) {
-            setLiveAlerts(prev => [data as Alert, ...prev])
-            setNewCount(n => n + 1)
-          }
+      .on('postgres_changes' as any, { event: 'INSERT', schema: 'public', table: 'posts' }, async (payload: any) => {
+        const { data } = await supabase
+          .from('posts')
+          .select(POST_SELECT)
+          .eq('id', payload.new.id)
+          .single()
+        if (data) {
+          setLivePosts(prev => [data as unknown as PostRow, ...prev])
+          setNewCount(n => n + 1)
         }
-      )
+      })
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .subscribe((status: any) => setConnected(status === 'SUBSCRIBED'))
     return () => { supabase.removeChannel(channel) }
@@ -140,15 +119,14 @@ export function DashboardGrid({ alerts: initialAlerts }: { alerts: Alert[] }) {
       let data: Record<string, unknown> = {}
       try { data = await res.json() } catch { /* body vide */ }
       if (res.ok && data.ok) {
-        setScrapeMsg(`✓ ${data.accounts_scraped}/${data.total_accounts} comptes scrapés`)
+        setScrapeMsg(`✓ ${data.accounts_scraped}/${data.total_accounts} comptes`)
         setTimeout(handleRefresh, 1500)
       } else {
         setScrapeMsg((data.error as string) ?? `Erreur ${res.status}`)
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      setScrapeMsg(msg.includes('abort') ? 'Timeout — résultat en cours…' : `Erreur: ${msg}`)
-      // Refresh quand même au cas où des posts ont été sauvés avant le timeout
+      setScrapeMsg(msg.includes('abort') ? 'Timeout — actualisation en cours…' : `Erreur: ${msg}`)
       setTimeout(handleRefresh, 2000)
     }
     setScraping(false)
@@ -157,28 +135,28 @@ export function DashboardGrid({ alerts: initialAlerts }: { alerts: Alert[] }) {
 
   // ── Filtres ────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
-    let list = [...liveAlerts]
+    let list = [...livePosts]
+
     if (period !== 'all') {
       const now = Date.now()
-      const ms  = period === '24h' ? 86400000 : period === '7d' ? 604800000 : 2592000000
-      list = list.filter(a => now - new Date(a.detected_at).getTime() < ms)
+      const ms  = period === '24h' ? 86_400_000 : period === '7d' ? 604_800_000 : 2_592_000_000
+      list = list.filter(p => now - new Date(p.published_at).getTime() < ms)
     }
-    if (minViews > 0)       list = list.filter(a => (a.viral_views ?? 0) >= minViews)
-    if (minMultiplier > 0)  list = list.filter(a => a.multiplier >= minMultiplier)
-    if (type !== 'all')     list = list.filter(a => a.posts?.type === type)
-    if (sort === 'ratio')       list.sort((a, b) => b.multiplier - a.multiplier)
-    else if (sort === 'views')  list.sort((a, b) => (b.viral_views ?? 0) - (a.viral_views ?? 0))
-    else list.sort((a, b) => new Date(b.detected_at).getTime() - new Date(a.detected_at).getTime())
+    if (minViews > 0)       list = list.filter(p => (p.views_count ?? 0) >= minViews)
+    if (type !== 'all')     list = list.filter(p => p.type === type)
+    if (minMultiplier > 0)  list = list.filter(p => (p.viral_alerts?.[0]?.multiplier ?? 0) >= minMultiplier)
+
+    if (sort === 'recent') list.sort((a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime())
+    else if (sort === 'views') list.sort((a, b) => (b.views_count ?? 0) - (a.views_count ?? 0))
+    else list.sort((a, b) => (b.viral_alerts?.[0]?.multiplier ?? 0) - (a.viral_alerts?.[0]?.multiplier ?? 0))
+
     return list
-  }, [liveAlerts, period, minViews, minMultiplier, sort, type])
+  }, [livePosts, period, minViews, minMultiplier, sort, type])
 
   return (
     <div>
-
       {/* ── Barre actions ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-
-        {/* Indicateur Live */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: 5,
           padding: '5px 10px', borderRadius: 20,
@@ -190,55 +168,44 @@ export function DashboardGrid({ alerts: initialAlerts }: { alerts: Alert[] }) {
           {connected ? 'Live' : 'Connexion…'}
         </div>
 
-        {/* Nouvelles alertes */}
         {newCount > 0 && (
-          <div style={{
-            padding: '5px 11px', borderRadius: 20, fontSize: 11, fontWeight: 700,
-            background: 'rgba(249,115,22,0.1)', border: '1px solid rgba(249,115,22,0.25)',
-            color: '#fb923c', cursor: 'pointer',
-          }} onClick={handleRefresh}>
-            +{newCount} nouvelle{newCount > 1 ? 's' : ''} — actualiser
+          <div
+            onClick={handleRefresh}
+            style={{
+              padding: '5px 11px', borderRadius: 20, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+              background: 'rgba(249,115,22,0.1)', border: '1px solid rgba(249,115,22,0.25)', color: '#fb923c',
+            }}
+          >
+            +{newCount} nouveau{newCount > 1 ? 'x' : ''} — actualiser
           </div>
         )}
 
         <div style={{ flex: 1 }} />
 
-        {/* Bouton Scraper */}
-        <button
-          onClick={handleScrape}
-          disabled={scraping}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '7px 14px', borderRadius: 10, fontSize: 12, fontWeight: 600,
-            cursor: scraping ? 'not-allowed' : 'pointer', opacity: scraping ? 0.7 : 1,
-            background: 'rgba(37,99,235,0.1)', border: '1px solid rgba(37,99,235,0.25)',
-            color: 'var(--accent-glow)', transition: 'all 0.15s',
-          }}
-        >
+        <button onClick={handleScrape} disabled={scraping} style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '7px 14px', borderRadius: 10, fontSize: 12, fontWeight: 600,
+          cursor: scraping ? 'not-allowed' : 'pointer', opacity: scraping ? 0.7 : 1,
+          background: 'rgba(37,99,235,0.1)', border: '1px solid rgba(37,99,235,0.25)',
+          color: 'var(--accent-glow)', transition: 'all 0.15s',
+        }}>
           {scraping
             ? <><Loader2 size={12} style={{ animation: 'spin 0.8s linear infinite' }} /> Scraping…</>
-            : <><Zap size={12} /> Scraper</>
-          }
+            : <><Zap size={12} /> Scraper</>}
         </button>
 
-        {/* Bouton Actualiser */}
-        <button
-          onClick={handleRefresh}
-          disabled={refreshing}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '7px 14px', borderRadius: 10, fontSize: 12, fontWeight: 600,
-            cursor: refreshing ? 'not-allowed' : 'pointer', opacity: refreshing ? 0.7 : 1,
-            background: 'var(--bg-card)', border: '1px solid var(--border)',
-            color: 'var(--text-2)', transition: 'all 0.15s',
-          }}
-        >
+        <button onClick={handleRefresh} disabled={refreshing} style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '7px 14px', borderRadius: 10, fontSize: 12, fontWeight: 600,
+          cursor: refreshing ? 'not-allowed' : 'pointer', opacity: refreshing ? 0.7 : 1,
+          background: 'var(--bg-card)', border: '1px solid var(--border)',
+          color: 'var(--text-2)', transition: 'all 0.15s',
+        }}>
           <RefreshCw size={12} style={{ animation: refreshing ? 'spin 0.6s linear infinite' : 'none' }} />
           Actualiser
         </button>
       </div>
 
-      {/* Résultat scrape */}
       {scrapeMsg && (
         <div style={{
           marginBottom: 12, padding: '8px 14px', borderRadius: 10, fontSize: 12,
@@ -325,9 +292,9 @@ export function DashboardGrid({ alerts: initialAlerts }: { alerts: Alert[] }) {
           gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
           gap: 14,
         }}>
-          {filtered.map((alert, i) => (
-            <div key={alert.id} className="slide-up" style={{ animationDelay: `${i * 0.03}s` }}>
-              <AlertCard alert={alert} />
+          {filtered.map((post, i) => (
+            <div key={post.id} className="slide-up" style={{ animationDelay: `${i * 0.02}s` }}>
+              <PostCard post={post} />
             </div>
           ))}
         </div>
@@ -346,10 +313,13 @@ export function DashboardGrid({ alerts: initialAlerts }: { alerts: Alert[] }) {
             <TrendingUp size={24} style={{ opacity: 0.35, color: 'var(--accent-glow)' }} />
           </div>
           <p style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-2)', margin: '0 0 6px' }}>
-            Aucune alerte pour ces filtres
+            {livePosts.length === 0 ? 'Aucun post scrapé' : 'Aucun résultat pour ces filtres'}
           </p>
           <p style={{ fontSize: 13, margin: 0 }}>
-            Clique sur <strong style={{ color: 'var(--text-2)' }}>Scraper</strong> pour lancer une analyse
+            {livePosts.length === 0
+              ? <>Clique sur <strong style={{ color: 'var(--text-2)' }}>Scraper</strong> pour commencer</>
+              : 'Modifie les filtres ou efface-les'
+            }
           </p>
         </div>
       )}

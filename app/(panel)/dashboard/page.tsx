@@ -8,29 +8,31 @@ export default async function DashboardPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: alerts } = await supabase
-    .from('viral_alerts')
+  // Tous les posts scrapés, avec données virales si disponibles
+  const { data: posts } = await supabase
+    .from('posts')
     .select(`
-      *,
-      posts ( id, type, url, thumbnail_url, caption, views_count, likes_count, comments_count, published_at, instagram_post_id ),
-      monitored_accounts ( id, instagram_username )
+      id, type, url, thumbnail_url, caption,
+      views_count, likes_count, comments_count, published_at, instagram_post_id,
+      account_id,
+      monitored_accounts ( id, instagram_username ),
+      viral_alerts ( multiplier, baseline_views, viral_views, detected_at )
     `)
-    .order('detected_at', { ascending: false })
-    .limit(120)
+    .order('published_at', { ascending: false })
+    .limit(200)
 
-  if (alerts && alerts.length > 0) {
-    await supabase.from('alert_reads').upsert(
-      alerts.map(a => ({ user_id: user.id, alert_id: a.id })),
-      { onConflict: 'user_id,alert_id' }
-    )
-  }
+  const allPosts = (posts ?? []) as unknown as PostRow[]
 
-  const todayAlerts = alerts?.filter(a =>
-    new Date(a.detected_at).toDateString() === new Date().toDateString()
-  ) ?? []
-
-  const maxRatio   = alerts?.length ? Math.max(...alerts.map(a => a.multiplier)) : 0
-  const totalViews = alerts?.reduce((s, a) => s + (a.viral_views ?? 0), 0) ?? 0
+  // Stats
+  const viralPosts  = allPosts.filter(p => (p.viral_alerts?.length ?? 0) > 0)
+  const todayVirals = viralPosts.filter(p =>
+    p.viral_alerts?.[0]?.detected_at &&
+    new Date(p.viral_alerts[0].detected_at).toDateString() === new Date().toDateString()
+  )
+  const maxRatio   = viralPosts.length
+    ? Math.max(...viralPosts.map(p => p.viral_alerts?.[0]?.multiplier ?? 0))
+    : 0
+  const totalViews = allPosts.reduce((s, p) => s + (p.views_count ?? 0), 0)
 
   function formatNum(n: number) {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -47,8 +49,7 @@ export default async function DashboardPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
             <div style={{
               width: 38, height: 38, borderRadius: 12,
-              background: 'rgba(249,115,22,0.1)',
-              border: '1px solid rgba(249,115,22,0.2)',
+              background: 'rgba(249,115,22,0.1)', border: '1px solid rgba(249,115,22,0.2)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
               <Flame size={18} style={{ color: '#f97316' }} />
@@ -58,21 +59,18 @@ export default async function DashboardPage() {
             </h1>
           </div>
           <p style={{ fontSize: 13, color: 'var(--text-2)', margin: 0 }}>
-            Contenus qui dépassent&nbsp;
-            <span style={{ color: 'var(--accent-glow)', fontWeight: 600 }}>5×</span>
-            &nbsp;la moyenne des vues du compte
+            Tous les contenus scrapés — les posts viraux sont mis en avant
           </p>
         </div>
         <div style={{
           display: 'flex', alignItems: 'center', gap: 6,
           padding: '8px 14px', borderRadius: 12,
-          background: 'rgba(37,99,235,0.07)',
-          border: '1px solid rgba(37,99,235,0.15)',
+          background: 'rgba(37,99,235,0.07)', border: '1px solid rgba(37,99,235,0.15)',
           fontSize: 12, fontWeight: 600, color: 'var(--accent-glow)',
           whiteSpace: 'nowrap', flexShrink: 0,
         }}>
           <Activity size={12} />
-          {alerts?.length ?? 0} alertes
+          {allPosts.length} posts · {viralPosts.length} viraux
         </div>
       </div>
 
@@ -80,19 +78,20 @@ export default async function DashboardPage() {
       <div className="stat-grid stagger" style={{ marginBottom: 24 }}>
         <StatCard
           icon={<Zap size={15} />}
-          label="Alertes aujourd'hui"
-          value={String(todayAlerts.length)}
+          label="Viraux aujourd'hui"
+          value={String(todayVirals.length)}
           color="#f97316"
           alphaBg="rgba(249,115,22,0.06)"
           border="rgba(249,115,22,0.14)"
         />
         <StatCard
           icon={<BarChart2 size={15} />}
-          label="Total alertes"
-          value={String(alerts?.length ?? 0)}
+          label="Posts scrapés"
+          value={String(allPosts.length)}
           color="#3b82f6"
           alphaBg="rgba(59,130,246,0.06)"
           border="rgba(59,130,246,0.14)"
+          sub={`${viralPosts.length} viral${viralPosts.length !== 1 ? 'aux' : ''}`}
         />
         <StatCard
           icon={<TrendingUp size={15} />}
@@ -105,28 +104,36 @@ export default async function DashboardPage() {
         />
       </div>
 
-      {/* ── Grille interactive (client) ── */}
-      <DashboardGrid alerts={alerts ?? []} />
+      {/* ── Grille (client) ── */}
+      <DashboardGrid posts={allPosts} />
     </div>
   )
+}
+
+export type PostRow = {
+  id: string
+  type: string
+  url: string
+  thumbnail_url: string | null
+  caption: string | null
+  views_count: number
+  likes_count: number
+  comments_count: number
+  published_at: string
+  instagram_post_id: string
+  account_id: string
+  monitored_accounts: { id: string; instagram_username: string } | null
+  viral_alerts: { multiplier: number; baseline_views: number; viral_views: number; detected_at: string }[] | null
 }
 
 function StatCard({
   icon, label, value, color, alphaBg, border, sub,
 }: {
-  icon: React.ReactNode
-  label: string
-  value: string
-  color: string
-  alphaBg: string
-  border: string
-  sub?: string
+  icon: React.ReactNode; label: string; value: string
+  color: string; alphaBg: string; border: string; sub?: string
 }) {
   return (
-    <div
-      className="stat-card slide-up"
-      style={{ borderRadius: 18, padding: '20px 22px', background: alphaBg, border: `1px solid ${border}` }}
-    >
+    <div className="stat-card slide-up" style={{ borderRadius: 18, padding: '20px 22px', background: alphaBg, border: `1px solid ${border}` }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 14 }}>
         <span style={{ color }}>{icon}</span>
         <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-2)' }}>{label}</span>

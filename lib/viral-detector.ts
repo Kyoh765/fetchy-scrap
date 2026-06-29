@@ -38,7 +38,7 @@ export async function checkForViralPost(
     .order('published_at', { ascending: false })
     .limit(baselineSize)
 
-  if (!recentPosts || recentPosts.length < 5) return // pas assez de données
+  if (!recentPosts || recentPosts.length < 2) return // pas assez de données
 
   // Moyenne des vues du compte (baseline)
   const totalViews = recentPosts.reduce((sum: number, p: { views_count: number }) => sum + (p.views_count || 0), 0)
