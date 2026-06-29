@@ -36,6 +36,7 @@ export async function middleware(request: NextRequest) {
   // Pages publiques — pas de redirection
   const PUBLIC_PATHS = ['/', '/login']
   if (PUBLIC_PATHS.includes(pathname)) return supabaseResponse
+  if (pathname.startsWith('/api/debug/')) return supabaseResponse
 
   // Redirection vers login si non connecté
   if (!user) {
