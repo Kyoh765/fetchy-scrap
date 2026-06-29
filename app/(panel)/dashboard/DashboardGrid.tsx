@@ -52,8 +52,16 @@ const TYPE_OPTIONS = [
   { label: 'Reel',      value: 'reel' },
   { label: 'Carousel',  value: 'carousel' },
 ]
+const MULTIPLIER_OPTIONS = [
+  { label: 'Tous',  value: 0  },
+  { label: '×2+',  value: 2  },
+  { label: '×5+',  value: 5  },
+  { label: '×8+',  value: 8  },
+  { label: '×10+', value: 10 },
+  { label: '×15+', value: 15 },
+]
 
-const DEFAULT = { period: 'all', minViews: 0, sort: 'ratio', type: 'all' }
+const DEFAULT = { period: 'all', minViews: 0, sort: 'ratio', type: 'all', minMultiplier: 0 }
 
 export function DashboardGrid({ alerts: initialAlerts }: { alerts: Alert[] }) {
   const [liveAlerts, setLiveAlerts] = useState<Alert[]>(initialAlerts)
@@ -63,13 +71,14 @@ export function DashboardGrid({ alerts: initialAlerts }: { alerts: Alert[] }) {
   const [scrapeMsg,  setScrapeMsg]  = useState<string | null>(null)
   const [connected,  setConnected]  = useState(false)
 
-  const [period,   setPeriod]   = useState(DEFAULT.period)
-  const [minViews, setMinViews] = useState(DEFAULT.minViews)
-  const [sort,     setSort]     = useState(DEFAULT.sort)
-  const [type,     setType]     = useState(DEFAULT.type)
+  const [period,        setPeriod]        = useState(DEFAULT.period)
+  const [minViews,      setMinViews]      = useState(DEFAULT.minViews)
+  const [sort,          setSort]          = useState(DEFAULT.sort)
+  const [type,          setType]          = useState(DEFAULT.type)
+  const [minMultiplier, setMinMultiplier] = useState(DEFAULT.minMultiplier)
 
-  const isDirty = period !== DEFAULT.period || minViews !== DEFAULT.minViews || type !== DEFAULT.type
-  function reset() { setPeriod(DEFAULT.period); setMinViews(DEFAULT.minViews); setType(DEFAULT.type) }
+  const isDirty = period !== DEFAULT.period || minViews !== DEFAULT.minViews || type !== DEFAULT.type || minMultiplier !== DEFAULT.minMultiplier
+  function reset() { setPeriod(DEFAULT.period); setMinViews(DEFAULT.minViews); setType(DEFAULT.type); setMinMultiplier(DEFAULT.minMultiplier) }
 
   // ── Actualiser ─────────────────────────────────────────────────────
   const handleRefresh = useCallback(async () => {
@@ -113,20 +122,28 @@ export function DashboardGrid({ alerts: initialAlerts }: { alerts: Alert[] }) {
     setScraping(true)
     setScrapeMsg(null)
     try {
-      const res  = await fetch('/api/panel/scrape', {
+      const controller = new AbortController()
+      const timeoutId  = setTimeout(() => controller.abort(), 55_000)
+      const res = await fetch('/api/panel/scrape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ batch: 8 }),
+        signal: controller.signal,
       })
-      const data = await res.json()
-      if (data.ok) {
+      clearTimeout(timeoutId)
+      let data: Record<string, unknown> = {}
+      try { data = await res.json() } catch { /* body vide */ }
+      if (res.ok && data.ok) {
         setScrapeMsg(`✓ ${data.accounts_scraped}/${data.total_accounts} comptes scrapés`)
         setTimeout(handleRefresh, 1500)
       } else {
-        setScrapeMsg(data.error ?? 'Erreur')
+        setScrapeMsg((data.error as string) ?? `Erreur ${res.status}`)
       }
-    } catch {
-      setScrapeMsg('Erreur réseau')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setScrapeMsg(msg.includes('abort') ? 'Timeout — résultat en cours…' : `Erreur: ${msg}`)
+      // Refresh quand même au cas où des posts ont été sauvés avant le timeout
+      setTimeout(handleRefresh, 2000)
     }
     setScraping(false)
     setTimeout(() => setScrapeMsg(null), 6000)
@@ -140,13 +157,14 @@ export function DashboardGrid({ alerts: initialAlerts }: { alerts: Alert[] }) {
       const ms  = period === '24h' ? 86400000 : period === '7d' ? 604800000 : 2592000000
       list = list.filter(a => now - new Date(a.detected_at).getTime() < ms)
     }
-    if (minViews > 0) list = list.filter(a => (a.viral_views ?? 0) >= minViews)
-    if (type !== 'all') list = list.filter(a => a.posts?.type === type)
+    if (minViews > 0)       list = list.filter(a => (a.viral_views ?? 0) >= minViews)
+    if (minMultiplier > 0)  list = list.filter(a => a.multiplier >= minMultiplier)
+    if (type !== 'all')     list = list.filter(a => a.posts?.type === type)
     if (sort === 'ratio')       list.sort((a, b) => b.multiplier - a.multiplier)
     else if (sort === 'views')  list.sort((a, b) => (b.viral_views ?? 0) - (a.viral_views ?? 0))
     else list.sort((a, b) => new Date(b.detected_at).getTime() - new Date(a.detected_at).getTime())
     return list
-  }, [liveAlerts, period, minViews, sort, type])
+  }, [liveAlerts, period, minViews, minMultiplier, sort, type])
 
   return (
     <div>
@@ -278,6 +296,15 @@ export function DashboardGrid({ alerts: initialAlerts }: { alerts: Alert[] }) {
             {TYPE_OPTIONS.map(o => (
               <FilterBtn key={o.value} active={type === o.value}
                 onClick={() => setType(type === o.value && o.value !== 'all' ? 'all' : o.value)}>
+                {o.label}
+              </FilterBtn>
+            ))}
+          </FilterGroup>
+          <Divider />
+          <FilterGroup label="Multiplicateur">
+            {MULTIPLIER_OPTIONS.map(o => (
+              <FilterBtn key={o.value} active={minMultiplier === o.value}
+                onClick={() => setMinMultiplier(minMultiplier === o.value && o.value !== 0 ? 0 : o.value)}>
                 {o.label}
               </FilterBtn>
             ))}

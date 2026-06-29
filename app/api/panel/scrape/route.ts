@@ -15,8 +15,9 @@ export async function POST(req: Request) {
     .eq('id', user.id)
     .single()
 
-  if (profile?.role !== 'admin') {
-    return NextResponse.json({ error: 'Forbidden — admin only' }, { status: 403 })
+  // Admin ou user connecté peuvent scraper
+  if (!profile?.role || !['admin', 'user'].includes(profile.role)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   // Lire batch/offset depuis le body
