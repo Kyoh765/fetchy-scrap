@@ -16,7 +16,8 @@ export async function scrapeAllAccounts() {
   }
 
   console.log(`Scraping de ${accounts.length} compte(s)...`)
-  const results: { username: string; posts: number; virals: number }[] = []
+  const results:  { username: string; posts: number; virals: number }[] = []
+  const errors:   { username: string; error: string }[] = []
 
   for (const account of accounts) {
     try {
@@ -81,9 +82,18 @@ export async function scrapeAllAccounts() {
       results.push({ username: account.instagram_username, posts: postsUpserted, virals: 0 })
       console.log(`✓ @${account.instagram_username}: ${postsUpserted} posts`)
     } catch (err) {
-      console.error(`✗ @${account.instagram_username}:`, err)
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`✗ @${account.instagram_username}:`, msg)
+      errors.push({ username: account.instagram_username, error: msg })
     }
   }
 
-  return { success: true, accounts: results.length, results }
+  return {
+    success:          true,
+    accounts_found:   accounts.length,
+    accounts_scraped: results.length,
+    accounts:         results.length,
+    results,
+    errors: errors.slice(0, 5), // premiers 5 pour debug
+  }
 }
