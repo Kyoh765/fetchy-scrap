@@ -2,6 +2,27 @@ import { getAccountPosts } from '../lib/hiker'
 import { checkForViralPost } from '../lib/viral-detector'
 import { createAdminClient } from '../lib/supabase/server'
 
+/** Extrait la meilleure URL de thumbnail depuis un post HikerAPI v1 */
+function extractThumb(post: Record<string, unknown>): string | null {
+  // 1. thumbnail_url direct (reels)
+  if (typeof post.thumbnail_url === 'string' && post.thumbnail_url) return post.thumbnail_url
+  // 2. cover_frame_url (variante reels)
+  if (typeof post.cover_frame_url === 'string' && post.cover_frame_url) return post.cover_frame_url
+  // 3. image_versions2.candidates[] — on prend la plus grande
+  type ImgCand = { url: string; width: number }
+  const iv2 = post.image_versions2 as { candidates?: ImgCand[] } | null | undefined
+  if (iv2?.candidates?.length) {
+    const sorted = [...iv2.candidates].sort((a, b) => b.width - a.width)
+    if (sorted[0]?.url) return sorted[0].url
+  }
+  // 4. Carousel : premier item image_versions2
+  const carousel = post.carousel_media as { image_versions2?: { candidates?: ImgCand[] } }[] | null | undefined
+  if (carousel?.[0]?.image_versions2?.candidates?.length) {
+    return carousel[0].image_versions2!.candidates![0].url
+  }
+  return null
+}
+
 export async function scrapeAllAccounts(opts?: { batch?: number; offset?: number }) {
   const db = createAdminClient()
 
@@ -53,7 +74,7 @@ export async function scrapeAllAccounts(opts?: { batch?: number; offset?: number
               instagram_post_id: String(post.id ?? post.pk),
               type:              (mediaType === 'carousel_container' || mediaType === '8') ? 'carousel' : 'reel',
               url:               String(post.permalink ?? `https://instagram.com/p/${post.code}/`),
-              thumbnail_url:     (post.thumbnail_url as string | null) ?? null,
+              thumbnail_url:     extractThumb(post),
               caption:           String((post.caption as Record<string,unknown>)?.text ?? post.caption ?? ''),
               views_count:       views,
               likes_count:       Number(post.like_count ?? 0),
