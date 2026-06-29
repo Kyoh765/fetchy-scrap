@@ -8,27 +8,37 @@ function formatNum(n: number) {
   return String(Math.round(n))
 }
 
-function getViralLevel(ratio: number) {
-  if (ratio >= 15) return { bg: 'rgba(239,68,68,0.9)' }
-  if (ratio >= 10) return { bg: 'rgba(249,115,22,0.9)' }
-  if (ratio >= 5)  return { bg: 'rgba(234,179,8,0.9)' }
-  return              { bg: 'rgba(34,197,94,0.9)' }
+function getMultiplierStyle(ratio: number): { bg: string; color: string; label: string } {
+  if (ratio >= 10) return { bg: 'rgba(239,68,68,0.88)',   color: 'white', label: `×${ratio}` }
+  if (ratio >= 5)  return { bg: 'rgba(249,115,22,0.88)',  color: 'white', label: `×${ratio}` }
+  if (ratio >= 2)  return { bg: 'rgba(234,179,8,0.88)',   color: 'white', label: `×${ratio}` }
+  if (ratio >= 1)  return { bg: 'rgba(34,197,94,0.75)',   color: 'white', label: `×${ratio}` }
+  return               { bg: 'rgba(100,116,139,0.65)', color: 'white', label: `×${ratio}` }
 }
 
 export function PostCard({ post }: { post: PostRow }) {
-  const account  = post.monitored_accounts
-  const viral    = post.viral_alerts?.[0] ?? null
-  const ratio    = viral?.multiplier ?? 0
-  const level    = viral ? getViralLevel(ratio) : null
+  const account = post.monitored_accounts
+  const viral   = post.viral_alerts?.[0] ?? null
+
+  // Multiplicateur : priorité à viral_alert, sinon computed
+  const ratio = (() => {
+    if (viral?.multiplier) return Math.round(viral.multiplier * 10) / 10
+    if (post.computed_multiplier !== null && post.computed_multiplier !== undefined)
+      return Math.round(post.computed_multiplier * 10) / 10
+    return null
+  })()
+
+  const style = ratio !== null ? getMultiplierStyle(ratio) : null
 
   return (
     <div
       className="card-hover"
       style={{
         borderRadius: 16, overflow: 'hidden',
-        background: 'var(--bg-card)', border: `1px solid ${viral ? 'rgba(37,99,235,0.25)' : 'var(--border)'}`,
+        background: 'var(--bg-card)',
+        border: `1px solid ${viral ? 'rgba(37,99,235,0.3)' : 'var(--border)'}`,
         display: 'flex', flexDirection: 'column',
-        boxShadow: viral ? '0 0 20px rgba(37,99,235,0.08)' : 'none',
+        boxShadow: viral ? '0 0 20px rgba(37,99,235,0.1)' : 'none',
       }}
     >
       {/* ── Thumbnail ── */}
@@ -42,7 +52,8 @@ export function PostCard({ post }: { post: PostRow }) {
           />
         ) : (
           <div style={{
-            position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            position: 'absolute', inset: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
             background: 'linear-gradient(135deg, #0d1527, #0c1a3a)',
           }}>
             <Play size={28} style={{ color: 'var(--text-3)', opacity: 0.4 }} />
@@ -56,16 +67,17 @@ export function PostCard({ post }: { post: PostRow }) {
           pointerEvents: 'none',
         }} />
 
-        {/* Badge viral — top left */}
-        {viral && level && (
+        {/* Pastille multiplicateur — top left */}
+        {style && ratio !== null && (
           <div style={{
             position: 'absolute', top: 10, left: 10,
-            background: level.bg, backdropFilter: 'blur(8px)',
-            borderRadius: 8, padding: '4px 8px',
-            display: 'flex', alignItems: 'center', gap: 4,
+            background: style.bg,
+            backdropFilter: 'blur(8px)',
+            borderRadius: 8, padding: '4px 9px',
+            display: 'flex', alignItems: 'center', gap: 3,
           }}>
-            <span style={{ fontSize: 13, fontWeight: 900, color: 'white', letterSpacing: '-0.02em' }}>
-              ×{ratio}
+            <span style={{ fontSize: 13, fontWeight: 900, color: style.color, letterSpacing: '-0.02em' }}>
+              {style.label}
             </span>
           </div>
         )}
@@ -80,8 +92,7 @@ export function PostCard({ post }: { post: PostRow }) {
         }}>
           {post.type === 'reel'
             ? <><Clapperboard size={9} /> Reel</>
-            : <><Images size={9} /> Carousel</>
-          }
+            : <><Images size={9} /> Carousel</>}
         </div>
 
         {/* Infos bas */}
@@ -115,9 +126,9 @@ export function PostCard({ post }: { post: PostRow }) {
           <MessageCircle size={11} style={{ color: 'var(--text-3)' }} />
           {formatNum(post.comments_count ?? 0)}
         </span>
-        {viral && (
-          <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-3)' }}>
-            base {formatNum(viral.baseline_views)}
+        {post.account_avg_views > 0 && (
+          <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
+            moy. {formatNum(post.account_avg_views)}
           </span>
         )}
       </div>
@@ -132,7 +143,7 @@ export function PostCard({ post }: { post: PostRow }) {
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
               padding: '7px 0', borderRadius: 9, fontSize: 12, fontWeight: 600,
-              color: 'white', textDecoration: 'none',
+              color: viral ? 'white' : 'var(--text-2)', textDecoration: 'none',
               background: viral
                 ? 'linear-gradient(135deg, #1d4ed8, #2563eb)'
                 : 'var(--bg-surface)',

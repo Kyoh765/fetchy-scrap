@@ -21,7 +21,26 @@ export default async function DashboardPage() {
     .order('published_at', { ascending: false })
     .limit(200)
 
-  const allPosts = (posts ?? []) as unknown as PostRow[]
+  const rawPosts = (posts ?? []) as unknown as PostRow[]
+
+  // Calcul de la moyenne des vues par compte
+  const accountStats: Record<string, { sum: number; count: number }> = {}
+  for (const p of rawPosts) {
+    const aid = p.account_id
+    if (!accountStats[aid]) accountStats[aid] = { sum: 0, count: 0 }
+    accountStats[aid].sum   += p.views_count ?? 0
+    accountStats[aid].count += 1
+  }
+
+  // Ajouter le multiplicateur calculé sur chaque post
+  const allPosts: PostRow[] = rawPosts.map(p => {
+    const stats = accountStats[p.account_id]
+    const avg   = stats && stats.count > 1 ? stats.sum / stats.count : 0
+    const computed_multiplier = avg > 0
+      ? Math.round((p.views_count / avg) * 10) / 10
+      : null
+    return { ...p, computed_multiplier, account_avg_views: Math.round(avg) }
+  })
 
   // Stats
   const viralPosts  = allPosts.filter(p => (p.viral_alerts?.length ?? 0) > 0)
@@ -119,11 +138,14 @@ export type PostRow = {
   views_count: number
   likes_count: number
   comments_count: number
-  published_at: string
+  published_at: string | null
   instagram_post_id: string
   account_id: string
   monitored_accounts: { id: string; instagram_username: string } | null
   viral_alerts: { multiplier: number; baseline_views: number; viral_views: number; detected_at: string }[] | null
+  // Calculé côté serveur
+  computed_multiplier: number | null
+  account_avg_views: number
 }
 
 function StatCard({

@@ -140,15 +140,34 @@ export function DashboardGrid({ posts: initialPosts }: { posts: PostRow[] }) {
     if (period !== 'all') {
       const now = Date.now()
       const ms  = period === '24h' ? 86_400_000 : period === '7d' ? 604_800_000 : 2_592_000_000
-      list = list.filter(p => now - new Date(p.published_at).getTime() < ms)
+      list = list.filter(p => {
+        if (!p.published_at) return true
+        return now - new Date(p.published_at).getTime() < ms
+      })
     }
-    if (minViews > 0)       list = list.filter(p => (p.views_count ?? 0) >= minViews)
-    if (type !== 'all')     list = list.filter(p => p.type === type)
-    if (minMultiplier > 0)  list = list.filter(p => (p.viral_alerts?.[0]?.multiplier ?? 0) >= minMultiplier)
+    if (minViews > 0) list = list.filter(p => (p.views_count ?? 0) >= minViews)
+    if (type !== 'all') list = list.filter(p => p.type === type)
+    if (minMultiplier > 0) {
+      list = list.filter(p => {
+        const m = p.viral_alerts?.[0]?.multiplier ?? p.computed_multiplier ?? 0
+        return m >= minMultiplier
+      })
+    }
 
-    if (sort === 'recent') list.sort((a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime())
-    else if (sort === 'views') list.sort((a, b) => (b.views_count ?? 0) - (a.views_count ?? 0))
-    else list.sort((a, b) => (b.viral_alerts?.[0]?.multiplier ?? 0) - (a.viral_alerts?.[0]?.multiplier ?? 0))
+    const getMultiplier = (p: PostRow) =>
+      p.viral_alerts?.[0]?.multiplier ?? p.computed_multiplier ?? 0
+
+    if (sort === 'recent') {
+      list.sort((a, b) => {
+        if (!a.published_at) return 1
+        if (!b.published_at) return -1
+        return new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
+      })
+    } else if (sort === 'views') {
+      list.sort((a, b) => (b.views_count ?? 0) - (a.views_count ?? 0))
+    } else {
+      list.sort((a, b) => getMultiplier(b) - getMultiplier(a))
+    }
 
     return list
   }, [livePosts, period, minViews, minMultiplier, sort, type])

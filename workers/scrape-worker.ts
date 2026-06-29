@@ -63,7 +63,24 @@ export async function scrapeAllAccounts(opts?: { batch?: number; offset?: number
           continue
         }
 
-        const views = Number(post.view_count ?? post.play_count ?? post.video_view_count ?? 0)
+        // Tous les noms possibles de vues selon la version HikerAPI
+        const views = Number(
+          post.view_count        ??
+          post.play_count        ??
+          post.video_view_count  ??
+          post.ig_play_count     ??
+          post.views_count       ??
+          (post.clips_metadata as Record<string,unknown>)?.reels_media_metadata as number ??
+          0
+        )
+
+        // Debug : log les champs du premier post pour identifier les bons noms
+        if (postsUpserted === 0) {
+          const viewFields = ['view_count','play_count','video_view_count','ig_play_count','views_count','views']
+          const found: Record<string,unknown> = {}
+          for (const f of viewFields) if (post[f] !== undefined) found[f] = post[f]
+          console.log(`[${account.instagram_username}] media_type=${post.media_type} view fields:`, JSON.stringify(found))
+        }
 
         // Upsert du post
         const { data: savedPost } = await db
