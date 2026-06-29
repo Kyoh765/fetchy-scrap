@@ -1,6 +1,6 @@
 'use client'
 import { useState, useMemo, useEffect, useCallback } from 'react'
-import { TrendingUp, X, SlidersHorizontal, RefreshCw, Loader2, Zap, Wifi } from 'lucide-react'
+import { TrendingUp, X, SlidersHorizontal, RefreshCw, Loader2, Zap, Wifi, Flame, Check } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { PostCard } from '@/components/PostCard'
 import type { PostRow } from './page'
@@ -40,7 +40,9 @@ const MULTIPLIER_OPTIONS = [
 
 const DEFAULT = { period: 'all', minViews: 0, sort: 'recent', type: 'all', minMultiplier: 0 }
 
-export function DashboardGrid({ posts: initialPosts }: { posts: PostRow[] }) {
+const THRESHOLD_OPTIONS = [0, 2, 3, 5, 8, 10, 15]
+
+export function DashboardGrid({ posts: initialPosts, defaultThreshold = 0 }: { posts: PostRow[]; defaultThreshold?: number }) {
   const [livePosts,  setLivePosts]  = useState<PostRow[]>(initialPosts)
   const [newCount,   setNewCount]   = useState(0)
   const [refreshing, setRefreshing] = useState(false)
@@ -53,7 +55,12 @@ export function DashboardGrid({ posts: initialPosts }: { posts: PostRow[] }) {
   const [minViews,      setMinViews]      = useState(DEFAULT.minViews)
   const [sort,          setSort]          = useState(DEFAULT.sort)
   const [type,          setType]          = useState(DEFAULT.type)
-  const [minMultiplier, setMinMultiplier] = useState(DEFAULT.minMultiplier)
+  const [minMultiplier, setMinMultiplier] = useState(defaultThreshold)
+
+  // Seuil persistant
+  const [threshold,     setThreshold]     = useState(defaultThreshold)
+  const [savingThreshold, setSavingThreshold] = useState(false)
+  const [savedThreshold,  setSavedThreshold]  = useState(false)
 
   const isDirty = period !== DEFAULT.period || minViews !== DEFAULT.minViews || type !== DEFAULT.type || minMultiplier !== DEFAULT.minMultiplier
   function reset() {
@@ -161,6 +168,23 @@ export function DashboardGrid({ posts: initialPosts }: { posts: PostRow[] }) {
     setTimeout(() => setScrapeMsg(null), 6000)
   }, [handleRefresh])
 
+  // ── Sauvegarde seuil viralité ──────────────────────────────────────
+  const saveThreshold = useCallback(async (val: number) => {
+    setSavingThreshold(true)
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ viral_threshold: val }),
+      })
+      setThreshold(val)
+      setMinMultiplier(val)
+      setSavedThreshold(true)
+      setTimeout(() => setSavedThreshold(false), 2000)
+    } catch { /* silencieux */ }
+    setSavingThreshold(false)
+  }, [])
+
   // ── Filtres ────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     let list = [...livePosts]
@@ -177,7 +201,9 @@ export function DashboardGrid({ posts: initialPosts }: { posts: PostRow[] }) {
     if (type !== 'all') list = list.filter(p => p.type === type)
     if (minMultiplier > 0) {
       list = list.filter(p => {
-        const m = p.viral_alerts?.[0]?.multiplier ?? p.computed_multiplier ?? 0
+        const m = p.viral_alerts?.[0]?.multiplier ?? p.computed_multiplier
+        // Si pas de données de vues → on inclut le post quand même
+        if (m === null || m === undefined) return true
         return m >= minMultiplier
       })
     }
@@ -264,6 +290,48 @@ export function DashboardGrid({ posts: initialPosts }: { posts: PostRow[] }) {
           {scrapeMsg}
         </div>
       )}
+
+      {/* ── Seuil de viralité ── */}
+      <div style={{
+        background: 'var(--bg-card)', border: '1px solid var(--border)',
+        borderRadius: 16, padding: '12px 16px', marginBottom: 12,
+        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Flame size={13} style={{ color: '#f97316' }} />
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', whiteSpace: 'nowrap' }}>
+            Seuil de viralité
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {THRESHOLD_OPTIONS.map(val => (
+            <button
+              key={val}
+              onClick={() => saveThreshold(val)}
+              disabled={savingThreshold}
+              style={{
+                padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: threshold === val ? 700 : 500,
+                cursor: 'pointer', transition: 'all 0.15s',
+                background: threshold === val ? 'rgba(249,115,22,0.18)' : 'var(--bg-surface)',
+                border: threshold === val ? '1px solid rgba(249,115,22,0.4)' : '1px solid var(--border)',
+                color: threshold === val ? '#f97316' : 'var(--text-3)',
+              }}
+            >
+              {val === 0 ? 'Tout' : `×${val}+`}
+            </button>
+          ))}
+        </div>
+
+        <span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 'auto' }}>
+          {savedThreshold
+            ? <span style={{ color: '#4ade80', display: 'flex', alignItems: 'center', gap: 4 }}><Check size={11} /> Sauvegardé</span>
+            : threshold === 0
+              ? 'Tous les posts visibles'
+              : `Seuls les posts ×${threshold}+ sont affichés`
+          }
+        </span>
+      </div>
 
       {/* ── Filtres ── */}
       <div style={{

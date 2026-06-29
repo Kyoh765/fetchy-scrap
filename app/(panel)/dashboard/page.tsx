@@ -8,6 +8,15 @@ export default async function DashboardPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  // Lire le seuil de viralité depuis app_settings
+  const { data: settingsRows } = await supabase
+    .from('app_settings')
+    .select('key, value')
+    .in('key', ['viral_threshold'])
+  const viralThreshold = Number(
+    settingsRows?.find(r => r.key === 'viral_threshold')?.value ?? 0
+  )
+
   // Tous les posts scrapés, avec données virales si disponibles
   const { data: posts } = await supabase
     .from('posts')
@@ -23,23 +32,46 @@ export default async function DashboardPage() {
 
   const rawPosts = (posts ?? []) as unknown as PostRow[]
 
-  // Calcul de la moyenne des vues par compte
-  const accountStats: Record<string, { sum: number; count: number }> = {}
+  // Stats par compte : vues (si dispo) ou likes en fallback
+  const accountViews:  Record<string, { sum: number; count: number }> = {}
+  const accountLikes:  Record<string, { sum: number; count: number }> = {}
   for (const p of rawPosts) {
     const aid = p.account_id
-    if (!accountStats[aid]) accountStats[aid] = { sum: 0, count: 0 }
-    accountStats[aid].sum   += p.views_count ?? 0
-    accountStats[aid].count += 1
+    if ((p.views_count ?? 0) > 0) {
+      if (!accountViews[aid]) accountViews[aid] = { sum: 0, count: 0 }
+      accountViews[aid].sum   += p.views_count
+      accountViews[aid].count += 1
+    }
+    if ((p.likes_count ?? 0) > 0) {
+      if (!accountLikes[aid]) accountLikes[aid] = { sum: 0, count: 0 }
+      accountLikes[aid].sum   += p.likes_count
+      accountLikes[aid].count += 1
+    }
   }
 
-  // Ajouter le multiplicateur calculé sur chaque post
   const allPosts: PostRow[] = rawPosts.map(p => {
-    const stats = accountStats[p.account_id]
-    const avg   = stats && stats.count > 1 ? stats.sum / stats.count : 0
-    const computed_multiplier = avg > 0
-      ? Math.round((p.views_count / avg) * 10) / 10
-      : null
-    return { ...p, computed_multiplier, account_avg_views: Math.round(avg) }
+    const aid         = p.account_id
+    const viewsHidden = (p.views_count ?? 0) === -1
+    const vsViews     = accountViews[aid]
+    const vsLikes     = accountLikes[aid]
+
+    // Multiplicateur basé sur les vues si dispo, sinon sur les likes
+    let computed_multiplier: number | null = null
+    let account_avg_views = 0
+    let uses_likes_fallback = false
+
+    if (!viewsHidden && vsViews && vsViews.count > 1) {
+      const avg = vsViews.sum / vsViews.count
+      computed_multiplier = avg > 0 ? Math.round((p.views_count / avg) * 10) / 10 : null
+      account_avg_views   = Math.round(avg)
+    } else if (vsLikes && vsLikes.count > 1 && (p.likes_count ?? 0) > 0) {
+      const avg = vsLikes.sum / vsLikes.count
+      computed_multiplier = avg > 0 ? Math.round((p.likes_count / avg) * 10) / 10 : null
+      account_avg_views   = Math.round(avg)
+      uses_likes_fallback = true
+    }
+
+    return { ...p, computed_multiplier, account_avg_views, uses_likes_fallback }
   })
 
   // Stats
@@ -124,7 +156,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* ── Grille (client) ── */}
-      <DashboardGrid posts={allPosts} />
+      <DashboardGrid posts={allPosts} defaultThreshold={viralThreshold} />
     </div>
   )
 }
@@ -146,6 +178,7 @@ export type PostRow = {
   // Calculé côté serveur
   computed_multiplier: number | null
   account_avg_views: number
+  uses_likes_fallback?: boolean
 }
 
 function StatCard({

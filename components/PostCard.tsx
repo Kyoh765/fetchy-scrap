@@ -71,14 +71,16 @@ export function PostCard({ post }: { post: PostRow }) {
         {style && ratio !== null && (
           <div style={{
             position: 'absolute', top: 10, left: 10,
-            background: style.bg,
-            backdropFilter: 'blur(8px)',
+            background: style.bg, backdropFilter: 'blur(8px)',
             borderRadius: 8, padding: '4px 9px',
-            display: 'flex', alignItems: 'center', gap: 3,
+            display: 'flex', alignItems: 'center', gap: 4,
           }}>
             <span style={{ fontSize: 13, fontWeight: 900, color: style.color, letterSpacing: '-0.02em' }}>
               {style.label}
             </span>
+            {post.uses_likes_fallback && (
+              <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.7)' }} title="Basé sur les likes (vues masquées)">♥</span>
+            )}
           </div>
         )}
 
@@ -116,7 +118,7 @@ export function PostCard({ post }: { post: PostRow }) {
       <div style={{ padding: '10px 12px 8px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-2)', fontWeight: 600 }}>
           <Eye size={11} style={{ color: 'var(--text-3)' }} />
-          {formatNum(post.views_count ?? 0)}
+          {post.views_count === -1 ? <span style={{ fontSize: 10, color: 'var(--text-3)' }}>N/A</span> : formatNum(post.views_count ?? 0)}
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-2)', fontWeight: 600 }}>
           <Heart size={11} style={{ color: 'var(--text-3)' }} />

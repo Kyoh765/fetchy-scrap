@@ -63,23 +63,17 @@ export async function scrapeAllAccounts(opts?: { batch?: number; offset?: number
           continue
         }
 
-        // play_count = vues des reels (HikerAPI v1)
-        // view_count est toujours 0 → ne pas l'utiliser en premier
-        const views = Number(
+        // Certains comptes Instagram désactivent l'affichage des vues
+        // → like_and_view_counts_disabled = true → play_count et view_count = 0
+        const viewsHidden = post.like_and_view_counts_disabled === true
+
+        const views = viewsHidden ? -1 : Number(  // -1 = vues masquées
           post.play_count       ||  // reels / clips ✓
           post.video_view_count ||  // videos classiques
           post.ig_play_count    ||  // variante
-          post.view_count       ||  // fallback (souvent 0)
+          post.view_count       ||  // fallback
           0
         )
-
-        // Debug : log les champs du premier post pour identifier les bons noms
-        if (postsUpserted === 0) {
-          const viewFields = ['view_count','play_count','video_view_count','ig_play_count','views_count','views']
-          const found: Record<string,unknown> = {}
-          for (const f of viewFields) if (post[f] !== undefined) found[f] = post[f]
-          console.log(`[${account.instagram_username}] media_type=${post.media_type} view fields:`, JSON.stringify(found))
-        }
 
         // Upsert du post
         const { data: savedPost } = await db
