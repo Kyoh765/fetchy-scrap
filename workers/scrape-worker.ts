@@ -22,17 +22,22 @@ export async function scrapeAllAccounts() {
   for (const account of accounts) {
     try {
       const rawPosts = await getAccountPosts(account.instagram_username)
-      const posts = Array.isArray(rawPosts) ? rawPosts : rawPosts?.data || []
+      // v1 retourne un array direct, v2 retourne { items: [...] } ou { data: [...] }
+      const posts: unknown[] = Array.isArray(rawPosts)
+        ? rawPosts
+        : rawPosts?.items ?? rawPosts?.data ?? []
 
       let postsUpserted = 0
 
-      for (const post of posts.slice(0, 12)) {
+      for (const _post of posts.slice(0, 12)) {
+        const post = _post as Record<string, unknown>
+        const mediaType = String(post.media_type ?? '').toLowerCase()
         // Filtre : reels + carousels uniquement
-        if (!['reel', 'carousel_container', 'video'].includes(post.media_type?.toLowerCase())) {
+        if (!['reel', 'carousel_container', 'video', '2', '8'].includes(mediaType)) {
           continue
         }
 
-        const views = post.view_count ?? post.play_count ?? post.video_view_count ?? 0
+        const views = Number(post.view_count ?? post.play_count ?? post.video_view_count ?? 0)
 
         // Upsert du post
         const { data: savedPost } = await db
@@ -40,17 +45,17 @@ export async function scrapeAllAccounts() {
           .upsert(
             {
               account_id:        account.id,
-              instagram_post_id: String(post.id || post.pk),
-              type:              post.media_type === 'carousel_container' ? 'carousel' : 'reel',
-              url:               post.permalink ?? `https://instagram.com/p/${post.code}/`,
-              thumbnail_url:     post.thumbnail_url ?? post.image_versions2?.candidates?.[0]?.url,
-              caption:           post.caption?.text ?? post.caption ?? '',
+              instagram_post_id: String(post.id ?? post.pk),
+              type:              (mediaType === 'carousel_container' || mediaType === '8') ? 'carousel' : 'reel',
+              url:               String(post.permalink ?? `https://instagram.com/p/${post.code}/`),
+              thumbnail_url:     (post.thumbnail_url as string | null) ?? null,
+              caption:           String((post.caption as Record<string,unknown>)?.text ?? post.caption ?? ''),
               views_count:       views,
-              likes_count:       post.like_count ?? 0,
-              comments_count:    post.comment_count ?? 0,
-              published_at:      post.taken_at
-                ? new Date(post.taken_at * 1000).toISOString()
-                : post.timestamp,
+              likes_count:       Number(post.like_count ?? 0),
+              comments_count:    Number(post.comment_count ?? 0),
+              published_at:      post.taken_at_ts
+                ? new Date(Number(post.taken_at_ts) * 1000).toISOString()
+                : post.taken_at ?? post.timestamp ?? null,
             },
             { onConflict: 'instagram_post_id' }
           )
