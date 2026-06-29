@@ -94,6 +94,12 @@ export function DashboardGrid({ alerts: initialAlerts }: { alerts: Alert[] }) {
     setRefreshing(false)
   }, [])
 
+  // ── Polling auto toutes les 30s (fallback si Realtime non configuré) ──
+  useEffect(() => {
+    const id = setInterval(handleRefresh, 30_000)
+    return () => clearInterval(id)
+  }, [handleRefresh])
+
   // ── Supabase Realtime ──────────────────────────────────────────────
   useEffect(() => {
     const supabase = createClient()
