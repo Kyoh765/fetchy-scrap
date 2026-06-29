@@ -2,20 +2,25 @@ import { getAccountPosts } from '../lib/hiker'
 import { checkForViralPost } from '../lib/viral-detector'
 import { createAdminClient } from '../lib/supabase/server'
 
-export async function scrapeAllAccounts() {
+export async function scrapeAllAccounts(opts?: { batch?: number; offset?: number }) {
   const db = createAdminClient()
 
-  const { data: accounts, error } = await db
+  const { data: allAccounts, error } = await db
     .from('monitored_accounts')
     .select('*')
     .eq('is_active', true)
+    .order('last_scraped_at', { ascending: true, nullsFirst: true })
 
-  if (error || !accounts) {
+  if (error || !allAccounts) {
     console.error('Erreur récupération comptes:', error)
     return { success: false, error }
   }
 
-  console.log(`Scraping de ${accounts.length} compte(s)...`)
+  const batch    = opts?.batch  ?? 8
+  const offset   = opts?.offset ?? 0
+  const accounts = allAccounts.slice(offset, offset + batch)
+
+  console.log(`Scraping de ${accounts.length}/${allAccounts.length} compte(s) (offset=${offset}, batch=${batch})...`)
   const results:  { username: string; posts: number; virals: number }[] = []
   const errors:   { username: string; error: string }[] = []
 
@@ -95,10 +100,12 @@ export async function scrapeAllAccounts() {
 
   return {
     success:          true,
+    total_accounts:   allAccounts.length,
     accounts_found:   accounts.length,
     accounts_scraped: results.length,
-    accounts:         results.length,
+    has_more:         offset + batch < allAccounts.length,
+    next_offset:      offset + batch,
     results,
-    errors: errors.slice(0, 5), // premiers 5 pour debug
+    errors: errors.slice(0, 5),
   }
 }
